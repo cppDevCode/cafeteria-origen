@@ -32,10 +32,10 @@ export default {
   // Se necesita para firmar el token anti-CSRF (corrección del CSRF).
   sessionSecret: 'origen-cafe-2024',
 
-  // FALLA: credenciales por defecto que nunca se cambian.
+  // Credenciales iniciales de administración (configurables por entorno).
   credencialesPorDefecto: {
-    username: 'admin',
-    password: 'admin',
+    username: process.env.ADMIN_USER || 'admin',
+    password: process.env.ADMIN_PASSWORD || 'Admin_Origen2024!',
   },
 
   uploadsDir: process.env.UPLOADS_DIR || path.join(__dirname, '..', 'uploads'),
