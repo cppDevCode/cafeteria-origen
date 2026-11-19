@@ -22,12 +22,12 @@
  * -----------------------------------------------------------------------------
  */
 
+import crypto from 'crypto';
 import type { Request, Response } from 'express';
 
 import type { Sesion, UsuarioSesion } from '../tipos';
 
 export const sesiones = new Map<string, Sesion>();
-let contadorSesiones = 0;
 
 /** Lee las cookies de la petición (parser mínimo, sin dependencias). */
 export function leerCookies(req: Request): Record<string, string> {
@@ -46,10 +46,7 @@ export function leerCookies(req: Request): Record<string, string> {
 
 /** Crea una sesión nueva para el usuario y setea la cookie. */
 export function crearSesion(req: Request, res: Response, usuario: UsuarioSesion): string {
-  contadorSesiones += 1;
-
-  // FALLA: identificador predecible.
-  const id = `sesion_${contadorSesiones}`;
+  const id = crypto.randomBytes(32).toString('hex');
 
   // FALLA: la sesión nunca expira.
   sesiones.set(id, {
