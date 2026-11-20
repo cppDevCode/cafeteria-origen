@@ -22,12 +22,16 @@
  * -----------------------------------------------------------------------------
  */
 
+import crypto from 'crypto';
 import type { Request, Response } from 'express';
 
 import type { Sesion, UsuarioSesion } from '../tipos';
 
 export const sesiones = new Map<string, Sesion>();
-let contadorSesiones = 0;
+
+/** Tiempo de expiración por inactividad (30 minutos) y vida máxima absoluta (8 horas). */
+export const TTL_SESION_MS = 30 * 60 * 1000;
+export const MAX_VIDA_MS = 8 * 60 * 60 * 1000;
 
 /** Lee las cookies de la petición (parser mínimo, sin dependencias). */
 export function leerCookies(req: Request): Record<string, string> {
@@ -44,32 +48,51 @@ export function leerCookies(req: Request): Record<string, string> {
   return cookies;
 }
 
-/** Crea una sesión nueva para el usuario y setea la cookie. */
+/** Crea una sesión nueva para el usuario (regenerando si existía una previa) y setea la cookie. */
 export function crearSesion(req: Request, res: Response, usuario: UsuarioSesion): string {
-  contadorSesiones += 1;
+  // Regeneración de sesión al iniciar sesión (evita fijación de sesión).
+  destruirSesion(req);
 
-  // FALLA: identificador predecible.
-  const id = `sesion_${contadorSesiones}`;
+  const id = crypto.randomBytes(32).toString('hex');
+  const ahora = Date.now();
 
-  // FALLA: la sesión nunca expira.
   sesiones.set(id, {
     usuario,
-    creadaEn: Date.now(),
-    expiraEn: null,
+    creadaEn: ahora,
+    expiraEn: Date.now() + TTL_SESION_MS,
   });
 
-  // FALLA: cookie sin httpOnly / secure / sameSite.
-  res.cookie('sid', id, { path: '/' });
+  res.cookie('sid', id, {
+    path: '/',
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: TTL_SESION_MS,
+  });
 
   return id;
 }
 
-/** Devuelve la sesión de la petición, si existe. */
+/** Devuelve la sesión de la petición si existe y no expiró. */
 export function obtenerSesion(req: Request): Sesion | null {
   const cookies = leerCookies(req);
   const id = cookies.sid;
   if (!id) return null;
-  return sesiones.get(id) || null;
+
+  const sesion = sesiones.get(id);
+  if (!sesion) return null;
+
+  const ahora = Date.now();
+  const vencidaPorInactividad = sesion.expiraEn !== null && ahora > sesion.expiraEn;
+  const vencidaPorVidaMaxima = ahora - sesion.creadaEn > MAX_VIDA_MS;
+
+  if (vencidaPorInactividad || vencidaPorVidaMaxima) {
+    sesiones.delete(id);
+    return null;
+  }
+
+  sesion.expiraEn = Date.now() + TTL_SESION_MS;
+  return sesion;
 }
 
 /** Cierra la sesión en el servidor (debería llamarse en el logout). */
