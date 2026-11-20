@@ -1,5 +1,11 @@
 import * as db from '../db';
-import type { Numerico } from '../tipos';
+import type { Numerico, Variedad } from '../tipos';
+
+const VARIEDADES_PERMITIDAS: readonly Variedad[] = [
+  'Brasil',
+  'Colombia',
+  'Etiopía',
+];
 
 export interface Facturacion {
   facturado: Numerico;
@@ -74,20 +80,29 @@ export async function masVendido(): Promise<ProductoMasVendido | null> {
 }
 
 /** Ventas por origen (variedad). */
-export async function ventasPorVariedad(variedad: string): Promise<VentaPorVariedad[]> {
-  // FALLA: inyección SQL — el origen se concatena en el texto de la consulta.
-  // El HAVING está al final a propósito: es donde un payload UNION clásico
-  // ("Brasil' UNION SELECT username, password, 1, 1 FROM usuarios--") cierra la
-  // consulta original y agrega la segunda, que lee otra tabla.
+/** Ventas por origen (variedad). */
+export async function ventasPorVariedad(
+  variedad: string
+): Promise<VentaPorVariedad[]> {
+  // Validar el origen contra una lista blanca.
+  if (!VARIEDADES_PERMITIDAS.some((permitida) => permitida === variedad)) {
+    return [];
+  }
+
+  // Consulta parametrizada: el origen se envía separado del SQL.
   const sql = `
     SELECT pr.variedad, pr.nombre, SUM(pi.cantidad) AS unidades,
            SUM(pi.cantidad * pi.precio_unitario) AS total
       FROM pedido_items pi
       JOIN productos pr ON pr.id = pi.producto_id
-     GROUP BY pr.variedad, pr.nombre
-    HAVING pr.variedad = '${variedad}'`;
+      GROUP BY pr.variedad, pr.nombre
+    HAVING pr.variedad = $1`;
 
-  const { rows } = await db.query<VentaPorVariedad>(sql);
+  const { rows } = await db.query<VentaPorVariedad>(
+    sql,
+    [variedad]
+  );
+
   return rows;
 }
 
