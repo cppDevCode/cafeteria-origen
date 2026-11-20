@@ -9,7 +9,7 @@ import pedidosRoutes from './routes/pedidos.routes';
 import reportesRoutes from './routes/reportes.routes';
 import comentariosRoutes from './routes/comentarios.routes';
 import adminRoutes from './routes/admin.routes';
-import debugRoutes from './routes/debug.routes';
+
 
 const app = express();
 
@@ -43,7 +43,7 @@ app.use('/api/pedidos', pedidosRoutes);
 app.use('/api/reportes', reportesRoutes);
 app.use('/api/comentarios', comentariosRoutes);
 app.use('/api/admin', adminRoutes);
-app.use('/api/_diagnostico', debugRoutes);
+
 
 app.use('/api', rutaNoEncontrada);
 
