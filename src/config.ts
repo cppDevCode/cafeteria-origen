@@ -1,17 +1,27 @@
 import path from 'path';
 
 /**
+ * Obtiene una variable de entorno obligatoria.
+ * Si no está definida o está vacía, impide iniciar la aplicación.
+ */
+function obtenerVariableObligatoria(nombre: string): string {
+  const valor = process.env[nombre];
+
+  if (!valor || !valor.trim()) {
+    throw new Error(`Falta configurar la variable de entorno: ${nombre}`);
+  }
+
+  return valor;
+}
+
+/**
  * Configuración de la aplicación.
  *
- * -----------------------------------------------------------------------------
- * FALLA 1 — Cifrado de datos y gestión de secretos (Ajustes de configuración)
- * -----------------------------------------------------------------------------
- * Las credenciales de la base de datos y el secreto de sesión están escritos
- * a mano en el código fuente. Cualquiera que clone el repositorio las conoce.
- *
- * Corrección: leer todo desde variables de entorno (ver .env.example) o desde
- * un gestor de secretos, y no versionar ningún secreto.
- * -----------------------------------------------------------------------------
+ * Corrección de seguridad:
+ * - Credenciales sensibles obtenidas desde variables de entorno.
+ * - Sin contraseñas ni secretos predeterminados.
+ * - Usuario de base de datos con privilegios limitados.
+ * - Validación de variables obligatorias al iniciar.
  */
 export default {
   port: Number(process.env.PORT || 3000),
@@ -21,21 +31,15 @@ export default {
     host: process.env.DB_HOST || 'db',
     port: Number(process.env.DB_PORT || 5432),
     database: process.env.DB_NAME || 'origen',
-    // FALLA: la aplicación se conecta con el superusuario de la base de datos
-    // (mínimos privilegios). Existe un usuario `origen_app` con permisos
-    // reducidos para usar como corrección.
-    user: process.env.DB_USER || 'postgres',
-    password: process.env.DB_PASSWORD || 'postgres',
+    user: obtenerVariableObligatoria('DB_USER'),
+    password: obtenerVariableObligatoria('DB_PASSWORD'),
   },
 
-  // FALLA: secreto fijo y predecible, escrito en el código.
-  // Se necesita para firmar el token anti-CSRF (corrección del CSRF).
-  sessionSecret: 'origen-cafe-2024',
+  sessionSecret: obtenerVariableObligatoria('SESSION_SECRET'),
 
-  // Credenciales iniciales de administración (configurables por entorno).
   credencialesPorDefecto: {
     username: process.env.ADMIN_USER || 'admin',
-    password: process.env.ADMIN_PASSWORD || 'Admin_Origen2024!',
+    password: obtenerVariableObligatoria('ADMIN_PASSWORD'),
   },
 
   uploadsDir: process.env.UPLOADS_DIR || path.join(__dirname, '..', 'uploads'),
