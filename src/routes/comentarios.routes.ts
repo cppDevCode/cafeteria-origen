@@ -1,5 +1,6 @@
 import express from 'express';
 import * as comentarios from '../services/comentarios.service';
+import { ErrorValidacion } from '../validacion';
 
 const router = express.Router();
 
@@ -31,8 +32,12 @@ router.post('/', async (req, res, next) => {
     });
     res.status(201).json(comentario);
   } catch (err) {
-    next(err);
-  }
+      if (err instanceof ErrorValidacion) {
+        return res.status(400).json({ error: err.message });
+      }
+
+      next(err);
+    }
 });
 
 /** DELETE /api/comentarios/:id */

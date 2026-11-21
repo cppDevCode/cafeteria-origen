@@ -1,5 +1,10 @@
 import * as db from '../db';
 import type { Comentario } from '../tipos';
+import {
+  esTextoValido,
+  esEnteroEnRango,
+  ErrorValidacion,
+} from '../validacion';
 
 /** Datos de una reseña nueva, tal como llegan en el cuerpo de la petición. */
 export interface NuevoComentario {
@@ -38,13 +43,25 @@ export async function listar(): Promise<Comentario[]> {
 
 /** Crea un comentario. */
 export async function crear({ autor, texto, calificacion }: NuevoComentario): Promise<Comentario> {
-  // FALLA: sin validación de longitud ni de rango de calificación.
-  const { rows } = await db.query<Comentario>(
-    `INSERT INTO comentarios (autor, texto, calificacion)
-     VALUES ($1, $2, $3)
-     RETURNING *`,
-    [autor, texto, calificacion]
-  );
+    if (!esTextoValido(autor, 1, 100)) {
+      throw new ErrorValidacion('El autor debe tener entre 1 y 100 caracteres.');
+    }
+
+    if (!esTextoValido(texto, 1, 1000)) {
+      throw new ErrorValidacion('El comentario debe tener entre 1 y 1000 caracteres.');
+    }
+
+    if (!esEnteroEnRango(calificacion, 1, 5)) {
+      throw new ErrorValidacion('La calificación debe ser un entero entre 1 y 5.');
+    }
+
+    const { rows } = await db.query<Comentario>(
+      `INSERT INTO comentarios (autor, texto, calificacion)
+        VALUES ($1, $2, $3)
+      RETURNING *`,
+      [autor, texto, calificacion]
+    );
+
   return rows[0];
 }
 

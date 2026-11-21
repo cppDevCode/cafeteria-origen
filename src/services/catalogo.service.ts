@@ -32,36 +32,60 @@ type Id = number | string;
  */
 
 /** Lista productos aplicando los filtros del menú. */
-export async function listar(filtros: FiltrosCatalogo = {}): Promise<ProductoConPrecio[]> {
-  const { tipo, variedad, q } = filtros;
+export async function listar(
+    filtros: FiltrosCatalogo = {}
+  ): Promise<ProductoConPrecio[]> {
+    const { tipo, variedad, q } = filtros;
 
-  // FALLA: concatenación directa de entrada de usuario en la consulta.
-  let sql = 'SELECT * FROM productos WHERE activo = true';
-  if (tipo) sql += ` AND tipo = '${tipo}'`;
-  if (variedad) sql += ` AND variedad = '${variedad}'`;
-  if (q) {
-    sql += ` AND (nombre ILIKE '%${q}%' OR descripcion ILIKE '%${q}%')`;
-  }
-  sql += ' ORDER BY tipo, variedad NULLS FIRST, id';
+    let sql = 'SELECT * FROM productos WHERE activo = true';
+    const params: string[] = [];
 
-  const { rows } = await db.query<Producto>(sql);
+    if (tipo) {
+      params.push(tipo);
+      sql += ` AND tipo = $${params.length}`;
+    }
 
-  return rows.map((p) => ({ ...p, precio: calcularPrecio(p) }));
+    if (variedad) {
+      params.push(variedad);
+      sql += ` AND variedad = $${params.length}`;
+    }
+
+    if (q) {
+      params.push(`%${q}%`);
+      sql += ` AND (nombre ILIKE $${params.length} OR descripcion ILIKE $${params.length})`;
+    }
+
+    sql += ' ORDER BY tipo, variedad NULLS FIRST, id';
+
+    const { rows } = await db.query<Producto>(sql, params);
+
+    return rows.map((p) => ({
+      ...p,
+      precio: calcularPrecio(p),
+  }));
 }
-
 /** Obtiene un producto por id. */
-export async function obtener(id: Id): Promise<ProductoConPrecio | null> {
-  // FALLA: inyección SQL en el id.
-  const { rows } = await db.query<Producto>(`SELECT * FROM productos WHERE id = '${id}'`);
-  if (!rows[0]) return null;
-  return { ...rows[0], precio: calcularPrecio(rows[0]) };
+export async function obtener(
+    id: Id
+  ): Promise<ProductoConPrecio | null> {
+    const { rows } = await db.query<Producto>(
+      'SELECT * FROM productos WHERE id = $1',
+      [id]
+    );
+
+    if (!rows[0]) return null;
+
+    return {
+      ...rows[0],
+      precio: calcularPrecio(rows[0]),
+    };
 }
 
 /** Crea un producto nuevo. */
 export async function crear(datos: DatosProductoEntrada): Promise<Producto> {
   const { rows } = await db.query<Producto>(
     `INSERT INTO productos (nombre, tipo, variedad, tamano, gramos, precio_base, precio_por_gramo, descripcion)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
      RETURNING *`,
     [
       datos.nombre,
