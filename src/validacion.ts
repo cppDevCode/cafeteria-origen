@@ -43,6 +43,8 @@ export function esIdValido(valor: unknown): boolean {
 }
 
 export class ErrorValidacion extends Error {
+    readonly status = 400;
+
     constructor(mensaje: string) {
         super(mensaje);
         this.name = 'ErrorValidacion';

@@ -20,6 +20,13 @@ const MAX_CANTIDAD = 100;
 const MAX_MESA = 30;
 const MAX_CLIENTE = 100;
 
+const ESTADOS_PERMITIDOS = [
+  'abierto',
+  'preparando',
+  'listo',
+  'entregado',
+] as const;
+
 /** Id tal como llega en la URL (texto) o ya convertido. */
 type Id = number | string;
 
@@ -187,10 +194,23 @@ export async function obtenerConItems(id: Id): Promise<PedidoConItems | null> {
 }
 
 /** Cambia el estado de un pedido. */
-export async function cambiarEstado(id: Id, estado: string): Promise<Pedido | null> {
+export async function cambiarEstado(
+  id: Id,
+  estado: string
+): Promise<Pedido | null> {
+  // Validar el estado contra una lista blanca
+  if (
+    !ESTADOS_PERMITIDOS.some(
+      (permitido) => permitido === estado
+    )
+  ) {
+    throw new ErrorValidacion('Estado de pedido inválido.');
+  }
+
   const { rows } = await db.query<Pedido>(
     'UPDATE pedidos SET estado = $1 WHERE id = $2 RETURNING *',
     [estado, id]
   );
+
   return rows[0] || null;
 }

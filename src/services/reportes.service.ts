@@ -80,7 +80,6 @@ export async function masVendido(): Promise<ProductoMasVendido | null> {
 }
 
 /** Ventas por origen (variedad). */
-/** Ventas por origen (variedad). */
 export async function ventasPorVariedad(
   variedad: string
 ): Promise<VentaPorVariedad[]> {
