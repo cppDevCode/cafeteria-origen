@@ -1,8 +1,7 @@
-
 import express from 'express';
 import fs from 'fs';
 import path from 'path';
-import { exec } from 'child_process';
+import { spawn } from 'child_process';
 
 import config from '../config';
 import * as catalogo from '../services/catalogo.service';
@@ -136,13 +135,27 @@ router.post('/cambiar-contrasena', async (req, res, next) => {
 router.post('/probar-conexion', (req, res) => {
   const { host } = req.body || {};
 
-  const comando = `ping -c 3 ${host}`;
+  // Lista blanca de hosts permitidos (Commit 8)
+  const hostsPermitidos = ['127.0.0.1', 'localhost', 'google.com', '8.8.8.8'];
+  if (!host || !hostsPermitidos.includes(host)) {
+    return res.status(400).json({ error: 'Host no permitido' });
+  }
 
-  exec(comando, (error, stdout, stderr) => {
+  const comando = `ping -c 3 ${host}`;
+  
+  // Uso de spawn sin shell para evitar Command Injection (Commit 8)
+  const proc = spawn('ping', ['-c', '3', host], { shell: false });
+  let stdout = '';
+  let stderr = '';
+
+  proc.stdout.on('data', (data) => { stdout += data.toString(); });
+  proc.stderr.on('data', (data) => { stderr += data.toString(); });
+
+  proc.on('close', (code) => {
     res.json({
       comando,
       salida: stdout,
-      error: stderr || (error ? error.message : null),
+      error: stderr || (code !== 0 ? `El comando falló con código ${code}` : null),
     });
   });
 });
