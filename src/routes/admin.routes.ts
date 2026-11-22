@@ -12,20 +12,19 @@ import { obtenerSesion } from '../middleware/sesion';
 
 const router = express.Router();
 
-function requiereAdmin(req: any, res: any, next: any) {
-  const sesion = obtenerSesion(req);
-
-  if (!sesion || !sesion.usuario || sesion.usuario.rol !== 'admin') {
-    return res.status(403).json({
-      error: 'Acceso denegado: se requiere rol admin',
-    });
-  }
-
-  next();
+// Función de validación de roles
+function requiereRol(rolEsperado: string) {
+  return (req: any, res: any, next: any) => {
+    const sesion = obtenerSesion(req);
+    if (!sesion || !sesion.usuario || sesion.usuario.rol !== rolEsperado) {
+      return res.status(403).json({ error: 'Acceso denegado: se requiere rol ' + rolEsperado });
+    }
+    next();
+  };
 }
 
-// Todas las rutas requieren rol administrador.
-router.use(requiereAdmin);
+// Aplicamos el middleware a todas las rutas
+router.use(requiereRol('admin'));
 router.use(requiereSesion);
 
 /** GET /api/admin/usuarios */
@@ -45,8 +44,16 @@ router.put('/usuarios/:id', async (req, res, next) => {
 
     if (username !== undefined) cambios.username = username;
     if (nombre !== undefined) cambios.nombre = nombre;
-    if (rol !== undefined) cambios.rol = rol;
     if (password !== undefined) cambios.password = password;
+    
+    // Validación extra para AUTH-15: evitar que un admin modifique el rol sin control
+    if (rol !== undefined) {
+      const sesion = obtenerSesion(req);
+      if (sesion?.usuario?.rol !== 'admin') {
+        return res.status(403).json({ error: 'No tienes permiso para cambiar roles.' });
+      }
+      cambios.rol = rol;
+    }
 
     const usuario = await usuarios.actualizar(req.params.id, cambios);
 
@@ -71,7 +78,6 @@ router.post('/productos', async (req, res, next) => {
         error: 'Ya existe un producto con ese nombre.',
       });
     }
-
     next(err);
   }
 });
@@ -135,7 +141,6 @@ router.post('/cambiar-contrasena', async (req, res, next) => {
 router.post('/probar-conexion', (req, res) => {
   const { host } = req.body || {};
 
-  // Lista blanca de hosts permitidos (Commit 8)
   const hostsPermitidos = ['127.0.0.1', 'localhost', 'google.com', '8.8.8.8'];
   if (!host || !hostsPermitidos.includes(host)) {
     return res.status(400).json({ error: 'Host no permitido' });
@@ -143,7 +148,6 @@ router.post('/probar-conexion', (req, res) => {
 
   const comando = `ping -c 3 ${host}`;
   
-  // Uso de spawn sin shell para evitar Command Injection (Commit 8)
   const proc = spawn('ping', ['-c', '3', host], { shell: false });
   let stdout = '';
   let stderr = '';
@@ -171,7 +175,6 @@ router.post('/subir-archivo', express.json({ limit: '8mb' }), (req, res, next) =
       });
     }
 
-    // Validación del nombre del archivo.
     if (
       typeof nombre !== 'string' ||
       path.basename(nombre) !== nombre ||
@@ -182,7 +185,6 @@ router.post('/subir-archivo', express.json({ limit: '8mb' }), (req, res, next) =
       });
     }
 
-    // Validación de extensión.
     const ext = path.extname(nombre).toLowerCase();
 
     if (!['.jpg', '.jpeg', '.png', '.gif', '.webp', '.pdf'].includes(ext)) {
@@ -191,7 +193,6 @@ router.post('/subir-archivo', express.json({ limit: '8mb' }), (req, res, next) =
       });
     }
 
-    // Validación del contenido Base64.
     if (
       typeof contenidoBase64 !== 'string' ||
       !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(contenidoBase64)
@@ -203,7 +204,6 @@ router.post('/subir-archivo', express.json({ limit: '8mb' }), (req, res, next) =
 
     const buffer = Buffer.from(contenidoBase64, 'base64');
 
-    // Límite de tamaño: 5 MB.
     if (buffer.length > 5 * 1024 * 1024) {
       return res.status(400).json({
         error: 'Archivo demasiado grande.',
