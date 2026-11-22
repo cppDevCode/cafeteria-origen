@@ -1,4 +1,4 @@
-/* =============================================================================
+﻿/* =============================================================================
    Cafetería Origen — lógica del panel de administración
    ============================================================================= */
 (function () {
@@ -7,6 +7,7 @@
   var API = '/api';
   var usuario = null;
   var productosCache = {};
+  var csrfToken = null;
 
   function $(sel) { return document.querySelector(sel); }
   function $$(sel) { return Array.prototype.slice.call(document.querySelectorAll(sel)); }
@@ -15,18 +16,21 @@
     return Number(valor || 0).toLocaleString('es-AR', { style: 'currency', currency: 'ARS' });
   }
 
-  function raw(valor) {
-    // FALLA: no escapa nada. Usar escaparHtml() / textContent.
-    return String(valor == null ? '' : valor);
-  }
+  async function api(url, opciones) {
+    opciones = opciones || {};
+    var metodo = (opciones.method || 'GET').toUpperCase();
 
-  function escaparHtml(texto) {
-    var div = document.createElement('div');
-    div.textContent = texto == null ? '' : String(texto);
-    return div.innerHTML;
-  }
+    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(metodo)) {
+      if (!csrfToken) {
+        var resCsrf = await fetch('/api/csrf-token');
+        var dataCsrf = await resCsrf.json();
+        csrfToken = dataCsrf.csrfToken;
+      }
+      opciones.headers = opciones.headers || {};
+      opciones.headers['X-CSRF-Token'] = csrfToken;
+      opciones.headers['Content-Type'] = opciones.headers['Content-Type'] || 'application/json';
+    }
 
-  function api(url, opciones) {
     return fetch(API + url, opciones).then(function (res) {
       return res.json().catch(function () { return {}; }).then(function (data) {
         return { ok: res.ok, status: res.status, data: data };
@@ -60,10 +64,9 @@
 
   function feedback(el, mensaje, ok) {
     el.className = 'form-feedback ' + (ok ? 'is-ok' : 'is-error');
-    el.innerHTML = mensaje;
+    el.textContent = mensaje;
   }
 
-  /* ------------------------------------------------------------------ login */
   function iniciarSesion(evento) {
     evento.preventDefault();
     var caja = $('#login-feedback');
@@ -74,8 +77,6 @@
       password: $('#login-password').value,
     }).then(function (resp) {
       if (!resp.ok) {
-        // FALLA (XSS reflejado): el mensaje del servidor (que incluye el
-        // usuario enviado) se pinta con innerHTML.
         feedback(caja, 'No pudimos iniciar sesión: ' + (resp.data.error || 'error desconocido'), false);
         return;
       }
@@ -87,17 +88,26 @@
   function cerrarSesion() {
     postJSON('/auth/logout', {}).then(function () {
       usuario = null;
+      csrfToken = null;
       $('#vista-login').hidden = false;
       $('#vista-panel').hidden = true;
-      $('#admin-user').innerHTML = '';
+      $('#admin-user').replaceChildren();
     });
   }
 
   function mostrarPanel() {
     $('#vista-login').hidden = true;
     $('#vista-panel').hidden = false;
-    $('#admin-user').innerHTML =
-      'Sesión de <strong>' + raw(usuario.nombre) + '</strong> · rol: <strong>' + raw(usuario.rol) + '</strong>';
+
+    var adminUser = $('#admin-user');
+    var txt1 = document.createTextNode('Sesión de ');
+    var strongNombre = document.createElement('strong');
+    strongNombre.textContent = usuario.nombre;
+    var txt2 = document.createTextNode(' · rol: ');
+    var strongRol = document.createElement('strong');
+    strongRol.textContent = usuario.rol;
+    adminUser.replaceChildren(txt1, strongNombre, txt2, strongRol);
+
     $('#panel-bienvenida').textContent = 'Hola, ' + usuario.nombre;
     cargarTodo();
   }
@@ -110,7 +120,22 @@
     cargarUsuarios();
   }
 
-  /* ---------------------------------------------------------------- resumen */
+  function crearKpi(label, value) {
+    var div = document.createElement('div');
+    div.className = 'kpi';
+
+    var lbl = document.createElement('div');
+    lbl.className = 'kpi-label';
+    lbl.textContent = label;
+
+    var val = document.createElement('div');
+    val.className = 'kpi-value';
+    val.textContent = value;
+
+    div.append(lbl, val);
+    return div;
+  }
+
   function cargarResumen() {
     api('/reportes/facturacion').then(function (f) {
       api('/reportes/mas-vendido').then(function (m) {
@@ -121,7 +146,7 @@
             { label: 'Pedidos registrados', value: f.data.pedidos },
             {
               label: 'Producto más vendido',
-              value: mas ? raw(mas.nombre) : '—',
+              value: mas ? mas.nombre : '—',
             },
             {
               label: 'Unidades por tipo',
@@ -131,48 +156,110 @@
             },
           ];
 
-          $('#kpis').innerHTML = kpis.map(function (k) {
-            return '<div class="kpi"><div class="kpi-label">' + raw(k.label) + '</div>' +
-              '<div class="kpi-value">' + raw(k.value) + '</div></div>';
-          }).join('');
+          var cont = $('#kpis');
+          cont.replaceChildren.apply(cont, kpis.map(function (k) {
+            return crearKpi(k.label, k.value);
+          }));
         });
       });
     });
   }
 
-  /* --------------------------------------------------------------- pedidos */
   function tablaPedidos(filas, conAcciones) {
-    if (!filas || filas.length === 0) return '<p class="empty">No hay pedidos.</p>';
+    var table = document.createElement('table');
 
-    var html = '<thead><tr><th>#</th><th>Mesa</th><th>Cliente</th><th>Estado</th>' +
-      '<th class="num">Total</th><th>Fecha</th>' + (conAcciones ? '<th>Acciones</th>' : '') + '</tr></thead><tbody>';
+    if (!filas || filas.length === 0) {
+      var wrap = document.createElement('div');
+      var p = document.createElement('p');
+      p.className = 'empty';
+      p.textContent = 'No hay pedidos.';
+      wrap.appendChild(p);
+      return wrap;
+    }
 
-    filas.forEach(function (p) {
-      html += '<tr>' +
-        '<td>' + raw(p.id) + '</td>' +
-        '<td>' + raw(p.mesa) + '</td>' +
-        '<td>' + raw(p.cliente) + '</td>' +
-        '<td><span class="badge badge-' + raw(p.estado) + '">' + raw(p.estado) + '</span></td>' +
-        '<td class="num">' + money(p.total) + '</td>' +
-        '<td>' + new Date(p.creado_en).toLocaleString('es-AR') + '</td>' +
-        (conAcciones
-          ? '<td><select data-pedido="' + raw(p.id) + '" class="sel-estado">' +
-            ['abierto', 'preparando', 'listo', 'entregado'].map(function (e) {
-              return '<option value="' + e + '"' + (e === p.estado ? ' selected' : '') + '>' + e + '</option>';
-            }).join('') +
-            '</select></td>'
-          : '') +
-        '</tr>';
+    var thead = document.createElement('thead');
+    var trHead = document.createElement('tr');
+    ['#', 'Mesa', 'Cliente', 'Estado'].forEach(function (h) {
+      var th = document.createElement('th');
+      th.textContent = h;
+      trHead.appendChild(th);
     });
+    var thTotal = document.createElement('th');
+    thTotal.className = 'num';
+    thTotal.textContent = 'Total';
+    trHead.appendChild(thTotal);
+    var thFecha = document.createElement('th');
+    thFecha.textContent = 'Fecha';
+    trHead.appendChild(thFecha);
+    if (conAcciones) {
+      var thAcc = document.createElement('th');
+      thAcc.textContent = 'Acciones';
+      trHead.appendChild(thAcc);
+    }
+    thead.appendChild(trHead);
+    table.appendChild(thead);
 
-    return html + '</tbody>';
+    var tbody = document.createElement('tbody');
+    filas.forEach(function (p) {
+      var tr = document.createElement('tr');
+
+      var tdId = document.createElement('td');
+      tdId.textContent = p.id;
+      tr.appendChild(tdId);
+
+      var tdMesa = document.createElement('td');
+      tdMesa.textContent = p.mesa;
+      tr.appendChild(tdMesa);
+
+      var tdCliente = document.createElement('td');
+      tdCliente.textContent = p.cliente;
+      tr.appendChild(tdCliente);
+
+      var tdEstado = document.createElement('td');
+      var badge = document.createElement('span');
+      badge.className = 'badge badge-' + p.estado;
+      badge.textContent = p.estado;
+      tdEstado.appendChild(badge);
+      tr.appendChild(tdEstado);
+
+      var tdTotal = document.createElement('td');
+      tdTotal.className = 'num';
+      tdTotal.textContent = money(p.total);
+      tr.appendChild(tdTotal);
+
+      var tdFecha = document.createElement('td');
+      tdFecha.textContent = new Date(p.creado_en).toLocaleString('es-AR');
+      tr.appendChild(tdFecha);
+
+      if (conAcciones) {
+        var tdAcc = document.createElement('td');
+        var select = document.createElement('select');
+        select.setAttribute('data-pedido', p.id);
+        select.className = 'sel-estado';
+        ['abierto', 'preparando', 'listo', 'entregado'].forEach(function (e) {
+          var opt = document.createElement('option');
+          opt.value = e;
+          opt.textContent = e;
+          if (e === p.estado) opt.selected = true;
+          select.appendChild(opt);
+        });
+        tdAcc.appendChild(select);
+        tr.appendChild(tdAcc);
+      }
+
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    return table;
   }
 
   function cargarPedidos() {
     api('/pedidos').then(function (resp) {
       var pedidos = resp.data.pedidos || [];
-      $('#tabla-pedidos').innerHTML = tablaPedidos(pedidos, true);
-      $('#tabla-ultimos').innerHTML = tablaPedidos(pedidos.slice(0, 5), false);
+      var t1 = $('#tabla-pedidos');
+      t1.replaceChildren(tablaPedidos(pedidos, true));
+      var t2 = $('#tabla-ultimos');
+      t2.replaceChildren(tablaPedidos(pedidos.slice(0, 5), false));
     });
   }
 
@@ -188,27 +275,68 @@
     });
   }
 
-  /* ------------------------------------------------------------- productos */
   function cargarProductos() {
     api('/productos').then(function (resp) {
       var productos = resp.data.productos || [];
       productosCache = {};
-      var html = '<thead><tr><th>#</th><th>Nombre</th><th>Tipo</th><th>Origen</th>' +
-        '<th class="num">Precio</th><th>Acciones</th></tr></thead><tbody>';
 
+      var table = document.createElement('table');
+      var thead = document.createElement('thead');
+      var trHead = document.createElement('tr');
+      ['#', 'Nombre', 'Tipo', 'Origen'].forEach(function (h) {
+        var th = document.createElement('th');
+        th.textContent = h;
+        trHead.appendChild(th);
+      });
+      var thPrecio = document.createElement('th');
+      thPrecio.className = 'num';
+      thPrecio.textContent = 'Precio';
+      trHead.appendChild(thPrecio);
+      var thAcc = document.createElement('th');
+      thAcc.textContent = 'Acciones';
+      trHead.appendChild(thAcc);
+      thead.appendChild(trHead);
+      table.appendChild(thead);
+
+      var tbody = document.createElement('tbody');
       productos.forEach(function (p) {
         productosCache[p.id] = p;
-        html += '<tr>' +
-          '<td>' + raw(p.id) + '</td>' +
-          '<td>' + raw(p.nombre) + '</td>' +
-          '<td>' + raw(p.tipo) + '</td>' +
-          '<td>' + raw(p.variedad || '—') + '</td>' +
-          '<td class="num">' + money(p.precio) + '</td>' +
-          '<td><button class="link-danger" data-borrar="' + raw(p.id) + '">Borrar</button></td>' +
-          '</tr>';
-      });
+        var tr = document.createElement('tr');
 
-      $('#tabla-productos').innerHTML = html + '</tbody>';
+        var tdId = document.createElement('td');
+        tdId.textContent = p.id;
+        tr.appendChild(tdId);
+
+        var tdNombre = document.createElement('td');
+        tdNombre.textContent = p.nombre;
+        tr.appendChild(tdNombre);
+
+        var tdTipo = document.createElement('td');
+        tdTipo.textContent = p.tipo;
+        tr.appendChild(tdTipo);
+
+        var tdVar = document.createElement('td');
+        tdVar.textContent = p.variedad || '—';
+        tr.appendChild(tdVar);
+
+        var tdPrecio = document.createElement('td');
+        tdPrecio.className = 'num';
+        tdPrecio.textContent = money(p.precio);
+        tr.appendChild(tdPrecio);
+
+        var tdAcc = document.createElement('td');
+        var btn = document.createElement('button');
+        btn.className = 'link-danger';
+        btn.setAttribute('data-borrar', p.id);
+        btn.textContent = 'Borrar';
+        tdAcc.appendChild(btn);
+        tr.appendChild(tdAcc);
+
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+
+      $('#tabla-productos').replaceChildren(table);
     });
   }
 
@@ -259,7 +387,6 @@
     $('#producto-id').value = '';
   }
 
-  /* ---------------------------------------------------------------- upload */
   function subirArchivo(evento) {
     evento.preventDefault();
     var caja = $('#upload-feedback');
@@ -289,7 +416,6 @@
     lector.readAsDataURL(archivo);
   }
 
-  /* -------------------------------------------------------------- reportes */
   function cargarReportes() {
     api('/reportes/facturacion').then(function (f) {
       api('/reportes/ticket-promedio').then(function (t) {
@@ -299,12 +425,12 @@
             { label: 'Facturación', value: money(f.data.facturado) },
             { label: 'Pedidos', value: f.data.pedidos },
             { label: 'Ticket promedio', value: money(t.data.promedio) },
-            { label: 'Más vendido', value: mas ? raw(mas.nombre) + ' (' + raw(mas.unidades) + ')' : '—' },
+            { label: 'Más vendido', value: mas ? mas.nombre + ' (' + mas.unidades + ')' : '—' },
           ];
-          $('#kpis-reportes').innerHTML = kpis.map(function (k) {
-            return '<div class="kpi"><div class="kpi-label">' + raw(k.label) + '</div>' +
-              '<div class="kpi-value">' + raw(k.value) + '</div></div>';
-          }).join('');
+          var cont = $('#kpis-reportes');
+          cont.replaceChildren.apply(cont, kpis.map(function (k) {
+            return crearKpi(k.label, k.value);
+          }));
         });
       });
     });
@@ -317,40 +443,113 @@
     api('/reportes/ventas-por-variedad?variedad=' + encodeURIComponent(variedad)).then(function (resp) {
       if (!resp.ok) {
         feedback(caja, 'Error: ' + (resp.data.error || 'desconocido'), false);
-        $('#tabla-ventas').innerHTML = '';
+        $('#tabla-ventas').replaceChildren();
         return;
       }
       var ventas = resp.data.ventas || [];
-      var html = '<thead><tr><th>Origen</th><th>Producto</th><th class="num">Unidades</th>' +
-        '<th class="num">Total</th></tr></thead><tbody>';
-      ventas.forEach(function (v) {
-        html += '<tr><td>' + raw(v.variedad) + '</td><td>' + raw(v.nombre) + '</td>' +
-          '<td class="num">' + raw(v.unidades) + '</td><td class="num">' + money(v.total) + '</td></tr>';
+
+      var table = document.createElement('table');
+      var thead = document.createElement('thead');
+      var trHead = document.createElement('tr');
+      ['Origen', 'Producto'].forEach(function (h) {
+        var th = document.createElement('th');
+        th.textContent = h;
+        trHead.appendChild(th);
       });
-      $('#tabla-ventas').innerHTML = html + '</tbody>';
+      var thUnidades = document.createElement('th');
+      thUnidades.className = 'num';
+      thUnidades.textContent = 'Unidades';
+      trHead.appendChild(thUnidades);
+      var thTotal = document.createElement('th');
+      thTotal.className = 'num';
+      thTotal.textContent = 'Total';
+      trHead.appendChild(thTotal);
+      thead.appendChild(trHead);
+      table.appendChild(thead);
+
+      var tbody = document.createElement('tbody');
+      ventas.forEach(function (v) {
+        var tr = document.createElement('tr');
+        var tdVar = document.createElement('td');
+        tdVar.textContent = v.variedad;
+        tr.appendChild(tdVar);
+        var tdNom = document.createElement('td');
+        tdNom.textContent = v.nombre;
+        tr.appendChild(tdNom);
+        var tdUni = document.createElement('td');
+        tdUni.className = 'num';
+        tdUni.textContent = v.unidades;
+        tr.appendChild(tdUni);
+        var tdTot = document.createElement('td');
+        tdTot.className = 'num';
+        tdTot.textContent = money(v.total);
+        tr.appendChild(tdTot);
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+
+      $('#tabla-ventas').replaceChildren(table);
       feedback(caja, 'Consulta realizada.', true);
     });
   }
 
-  /* -------------------------------------------------------------- usuarios */
   function cargarUsuarios() {
     api('/admin/usuarios').then(function (resp) {
       var usuarios = resp.data.usuarios || [];
-      var html = '<thead><tr><th>#</th><th>Usuario</th><th>Nombre</th><th>Rol</th><th>Acciones</th></tr></thead><tbody>';
-      usuarios.forEach(function (u) {
-        html += '<tr>' +
-          '<td>' + raw(u.id) + '</td>' +
-          '<td>' + raw(u.username) + '</td>' +
-          '<td>' + raw(u.nombre) + '</td>' +
-          '<td><span class="badge' + (u.rol === 'admin' ? ' badge-admin' : '') + '">' + raw(u.rol) + '</span></td>' +
-          '<td><select data-usuario="' + raw(u.id) + '" class="sel-rol">' +
-            ['cliente', 'mozo', 'barista', 'admin'].map(function (r) {
-              return '<option value="' + r + '"' + (r === u.rol ? ' selected' : '') + '>' + r + '</option>';
-            }).join('') +
-            '</select></td>' +
-          '</tr>';
+
+      var table = document.createElement('table');
+      var thead = document.createElement('thead');
+      var trHead = document.createElement('tr');
+      ['#', 'Usuario', 'Nombre', 'Rol', 'Acciones'].forEach(function (h) {
+        var th = document.createElement('th');
+        th.textContent = h;
+        trHead.appendChild(th);
       });
-      $('#tabla-usuarios').innerHTML = html + '</tbody>';
+      thead.appendChild(trHead);
+      table.appendChild(thead);
+
+      var tbody = document.createElement('tbody');
+      usuarios.forEach(function (u) {
+        var tr = document.createElement('tr');
+
+        var tdId = document.createElement('td');
+        tdId.textContent = u.id;
+        tr.appendChild(tdId);
+
+        var tdUser = document.createElement('td');
+        tdUser.textContent = u.username;
+        tr.appendChild(tdUser);
+
+        var tdNom = document.createElement('td');
+        tdNom.textContent = u.nombre;
+        tr.appendChild(tdNom);
+
+        var tdRol = document.createElement('td');
+        var badge = document.createElement('span');
+        badge.className = 'badge' + (u.rol === 'admin' ? ' badge-admin' : '');
+        badge.textContent = u.rol;
+        tdRol.appendChild(badge);
+        tr.appendChild(tdRol);
+
+        var tdAcc = document.createElement('td');
+        var select = document.createElement('select');
+        select.setAttribute('data-usuario', u.id);
+        select.className = 'sel-rol';
+        ['cliente', 'mozo', 'barista', 'admin'].forEach(function (r) {
+          var opt = document.createElement('option');
+          opt.value = r;
+          opt.textContent = r;
+          if (r === u.rol) opt.selected = true;
+          select.appendChild(opt);
+        });
+        tdAcc.appendChild(select);
+        tr.appendChild(tdAcc);
+
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+
+      $('#tabla-usuarios').replaceChildren(table);
     });
   }
 
@@ -378,7 +577,6 @@
     });
   }
 
-  /* ----------------------------------------------------------- herramientas */
   function probarConexion(evento) {
     evento.preventDefault();
     var salida = $('#salida-conexion');
@@ -404,7 +602,6 @@
     });
   }
 
-  /* ------------------------------------------------------------------ tabs */
   function activarTab(evento) {
     var tab = evento.target.closest('.tab');
     if (!tab) return;
@@ -416,15 +613,11 @@
     });
   }
 
-  /* ------------------------------------------------------------------ init */
   function init() {
-    // FALLA (XSS de DOM): se lee un parámetro de la URL y se inyecta con
-    // innerHTML. Al abrir admin.html?vista=<script>...</script> se ejecuta
-    // código en el navegador del admin.
     var params = new URLSearchParams(window.location.search);
     var objetivo = params.get('vista');
     if (objetivo) {
-      $('#panel-bienvenida').innerHTML = 'Panel ' + objetivo;
+      $('#panel-bienvenida').textContent = 'Panel ' + objetivo;
     }
 
     $('#form-login').addEventListener('submit', iniciarSesion);
@@ -442,7 +635,6 @@
     $('#form-conexion').addEventListener('submit', probarConexion);
     $('#btn-diagnostico').addEventListener('click', verDiagnostico);
 
-    // ¿Ya hay sesión?
     api('/auth/yo').then(function (resp) {
       if (resp.ok) {
         usuario = resp.data.usuario;
