@@ -6,6 +6,7 @@
 
   var API = '/api';
   var CARRITO_KEY = 'origen.carrito';
+  var csrfToken = null;
 
   var estado = {
     tipo: '',
@@ -14,7 +15,6 @@
     carrito: cargarCarrito(),
   };
 
-  /* ---------------------------------------------------------------- utils */
   function $(sel) { return document.querySelector(sel); }
 
   function money(valor) {
@@ -22,7 +22,21 @@
     return n.toLocaleString('es-AR', { style: 'currency', currency: 'ARS' });
   }
 
-  function api(url, opciones) {
+  async function api(url, opciones) {
+    opciones = opciones || {};
+    var metodo = (opciones.method || 'GET').toUpperCase();
+
+    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(metodo)) {
+      if (!csrfToken) {
+        var resCsrf = await fetch('/api/csrf-token');
+        var dataCsrf = await resCsrf.json();
+        csrfToken = dataCsrf.csrfToken;
+      }
+      opciones.headers = opciones.headers || {};
+      opciones.headers['X-CSRF-Token'] = csrfToken;
+      opciones.headers['Content-Type'] = opciones.headers['Content-Type'] || 'application/json';
+    }
+
     return fetch(API + url, opciones).then(function (res) {
       return res.json().catch(function () { return {}; }).then(function (data) {
         return { ok: res.ok, status: res.status, data: data };
@@ -52,7 +66,6 @@
     }
   }
 
-  /* ------------------------------------------------------------- catálogo */
   function urlCatalogo() {
     var params = new URLSearchParams();
     if (estado.tipo) params.set('tipo', estado.tipo);
@@ -163,7 +176,6 @@
     $('#productos-grid').replaceChildren(p);
   }
 
-  /* --------------------------------------------------------------- carrito */
   function agregarAlCarrito(productoId) {
     var existente = null;
     for (var i = 0; i < estado.carrito.length; i++) {
@@ -282,7 +294,6 @@
     $('#resumen-total').textContent = money(total);
   }
 
-  /* ---------------------------------------------------------------- pedidos */
   function enviarPedido(evento) {
     evento.preventDefault();
     var feedback = $('#pedido-feedback');
@@ -314,7 +325,6 @@
     });
   }
 
-  /* --------------------------------------------------------------- reseñas */
   function cargarReseñas() {
     return api('/comentarios').then(function (resp) {
       var cont = $('#lista-resenas');
@@ -341,7 +351,9 @@
         stars.className = 'review-stars';
         var estrellas = '';
         var i;
-        for (i = 0; i < Number(c.calificacion || 0); i++) estrellas += '★';
+        var calificacion = Number(c.calificacion || 0);
+        if (!isFinite(calificacion) || calificacion < 0) calificacion = 0;
+        for (i = 0; i < calificacion; i++) estrellas += '★';
         stars.textContent = estrellas;
 
         head.append(author, stars);
@@ -381,11 +393,9 @@
     });
   }
 
-  /* ------------------------------------------------------------- listeners */
   function init() {
     window.__productos = {};
 
-    // Filtros
     document.querySelectorAll('.chip').forEach(function (chip) {
       chip.addEventListener('click', function () {
         document.querySelectorAll('.chip').forEach(function (c) { c.classList.remove('is-active'); });
@@ -407,7 +417,6 @@
       temporizador = setTimeout(cargarProductos, 250);
     });
 
-    // Carrito (delegación de eventos)
     $('#productos-grid').addEventListener('click', function (e) {
       var btn = e.target.closest('.btn-agregar');
       if (!btn) return;
@@ -427,7 +436,6 @@
     $('#form-pedido').addEventListener('submit', enviarPedido);
     $('#form-resena').addEventListener('submit', enviarReseña);
 
-    // Carga inicial
     api(urlCatalogo()).then(function (resp) {
       if (resp.ok) {
         (resp.data.productos || []).forEach(function (p) { window.__productos[p.id] = p; });

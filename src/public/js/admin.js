@@ -7,6 +7,7 @@
   var API = '/api';
   var usuario = null;
   var productosCache = {};
+  var csrfToken = null;
 
   function $(sel) { return document.querySelector(sel); }
   function $$(sel) { return Array.prototype.slice.call(document.querySelectorAll(sel)); }
@@ -15,7 +16,21 @@
     return Number(valor || 0).toLocaleString('es-AR', { style: 'currency', currency: 'ARS' });
   }
 
-  function api(url, opciones) {
+  async function api(url, opciones) {
+    opciones = opciones || {};
+    var metodo = (opciones.method || 'GET').toUpperCase();
+
+    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(metodo)) {
+      if (!csrfToken) {
+        var resCsrf = await fetch('/api/csrf-token');
+        var dataCsrf = await resCsrf.json();
+        csrfToken = dataCsrf.csrfToken;
+      }
+      opciones.headers = opciones.headers || {};
+      opciones.headers['X-CSRF-Token'] = csrfToken;
+      opciones.headers['Content-Type'] = opciones.headers['Content-Type'] || 'application/json';
+    }
+
     return fetch(API + url, opciones).then(function (res) {
       return res.json().catch(function () { return {}; }).then(function (data) {
         return { ok: res.ok, status: res.status, data: data };
@@ -52,7 +67,6 @@
     el.textContent = mensaje;
   }
 
-  /* ------------------------------------------------------------------ login */
   function iniciarSesion(evento) {
     evento.preventDefault();
     var caja = $('#login-feedback');
@@ -74,6 +88,7 @@
   function cerrarSesion() {
     postJSON('/auth/logout', {}).then(function () {
       usuario = null;
+      csrfToken = null;
       $('#vista-login').hidden = false;
       $('#vista-panel').hidden = true;
       $('#admin-user').replaceChildren();
@@ -105,7 +120,6 @@
     cargarUsuarios();
   }
 
-  /* ---------------------------------------------------------------- resumen */
   function crearKpi(label, value) {
     var div = document.createElement('div');
     div.className = 'kpi';
@@ -151,7 +165,6 @@
     });
   }
 
-  /* --------------------------------------------------------------- pedidos */
   function tablaPedidos(filas, conAcciones) {
     var table = document.createElement('table');
 
@@ -262,7 +275,6 @@
     });
   }
 
-  /* ------------------------------------------------------------- productos */
   function cargarProductos() {
     api('/productos').then(function (resp) {
       var productos = resp.data.productos || [];
@@ -375,7 +387,6 @@
     $('#producto-id').value = '';
   }
 
-  /* ---------------------------------------------------------------- upload */
   function subirArchivo(evento) {
     evento.preventDefault();
     var caja = $('#upload-feedback');
@@ -405,7 +416,6 @@
     lector.readAsDataURL(archivo);
   }
 
-  /* -------------------------------------------------------------- reportes */
   function cargarReportes() {
     api('/reportes/facturacion').then(function (f) {
       api('/reportes/ticket-promedio').then(function (t) {
@@ -483,7 +493,6 @@
     });
   }
 
-  /* -------------------------------------------------------------- usuarios */
   function cargarUsuarios() {
     api('/admin/usuarios').then(function (resp) {
       var usuarios = resp.data.usuarios || [];
@@ -568,7 +577,6 @@
     });
   }
 
-  /* ----------------------------------------------------------- herramientas */
   function probarConexion(evento) {
     evento.preventDefault();
     var salida = $('#salida-conexion');
@@ -594,7 +602,6 @@
     });
   }
 
-  /* ------------------------------------------------------------------ tabs */
   function activarTab(evento) {
     var tab = evento.target.closest('.tab');
     if (!tab) return;
@@ -606,7 +613,6 @@
     });
   }
 
-  /* ------------------------------------------------------------------ init */
   function init() {
     var params = new URLSearchParams(window.location.search);
     var objetivo = params.get('vista');
