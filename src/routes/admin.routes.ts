@@ -8,8 +8,20 @@ import * as catalogo from '../services/catalogo.service';
 import * as usuarios from '../services/usuarios.service';
 import { requiereSesion, requiereRol } from '../middleware/auth';
 import type { Usuario } from '../tipos';
+import { obtenerSesion } from '../middleware/sesion';
 
 const router = express.Router();
+
+function requiereAdmin(req: any, res: any, next: any) {
+  const sesion = obtenerSesion(req);
+  if (!sesion || !sesion.usuario || sesion.usuario.rol !== 'admin') {
+    return res.status(403).json({ error: 'Acceso denegado: se requiere rol admin' });
+  }
+  next();
+}
+
+// Obliga a que TODAS las rutas de este archivo requieran ser admin
+router.use(requiereAdmin);
 
 /**
  * Rutas del panel de administración.
