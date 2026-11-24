@@ -13,25 +13,24 @@ export interface NuevoComentario {
   calificacion: number;
 }
 
+const LONGITUD_MIN_AUTOR = 1;
+const LONGITUD_MAX_AUTOR = 100;
+const LONGITUD_MIN_TEXTO = 1;
+const LONGITUD_MAX_TEXTO = 1000;
+
 /**
  * Servicio de comentarios / reseñas de la cafetería.
  *
- * -----------------------------------------------------------------------------
- * FALLA — Validación de entrada débil (OWASP A04:2021)
- * -----------------------------------------------------------------------------
- * No se valida longitud, ni formato, ni que la calificación esté en rango.
- *
- * -----------------------------------------------------------------------------
- * FALLA — Cross-Site Scripting almacenado (OWASP A03:2021)
- * -----------------------------------------------------------------------------
- * El texto del comentario se guarda tal cual y luego se devuelve en las
- * respuestas JSON que la web inserta en el DOM. Como el cliente lo pinta con
- * innerHTML, el script queda almacenado en la base y se ejecuta en el
- * navegador de CADA visitante (incluidos los administradores).
- *
- * Corrección: escapar/sanear la salida en el cliente (textContent en vez de
- * innerHTML) o, mejor, sanitizar en el servidor y aplicar CSP como capa extra.
+ * Valida longitud, rango y formato (texto plano sin etiquetas HTML ni
+ * caracteres de control) en el servidor antes de persistir cada reseña.
  */
+
+/** Elimina caracteres de control no imprimibles y recorta espacios extremos. */
+function sanitizarTexto(valor: string): string {
+  return valor
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+    .trim();
+}
 
 /** Lista todos los comentarios, del más nuevo al más viejo. */
 export async function listar(): Promise<Comentario[]> {
@@ -41,26 +40,55 @@ export async function listar(): Promise<Comentario[]> {
   return rows;
 }
 
-/** Crea un comentario. */
+/** Crea un comentario validando longitud, rango y formato en el servidor. */
 export async function crear({ autor, texto, calificacion }: NuevoComentario): Promise<Comentario> {
-    if (!esTextoValido(autor, 1, 100)) {
-      throw new ErrorValidacion('El autor debe tener entre 1 y 100 caracteres.');
-    }
-
-    if (!esTextoValido(texto, 1, 1000)) {
-      throw new ErrorValidacion('El comentario debe tener entre 1 y 1000 caracteres.');
-    }
-
-    if (!esEnteroEnRango(calificacion, 1, 5)) {
-      throw new ErrorValidacion('La calificación debe ser un entero entre 1 y 5.');
-    }
-
-    const { rows } = await db.query<Comentario>(
-      `INSERT INTO comentarios (autor, texto, calificacion)
-        VALUES ($1, $2, $3)
-      RETURNING *`,
-      [autor, texto, calificacion]
+  if (!esTextoValido(autor, LONGITUD_MIN_AUTOR, LONGITUD_MAX_AUTOR)) {
+    throw new ErrorValidacion(
+      `El autor debe tener entre ${LONGITUD_MIN_AUTOR} y ${LONGITUD_MAX_AUTOR} caracteres.`
     );
+  }
+
+  if (!esTextoValido(texto, LONGITUD_MIN_TEXTO, LONGITUD_MAX_TEXTO)) {
+    throw new ErrorValidacion(
+      `El comentario debe tener entre ${LONGITUD_MIN_TEXTO} y ${LONGITUD_MAX_TEXTO} caracteres.`
+    );
+  }
+
+  if (!esEnteroEnRango(calificacion, 1, 5)) {
+    throw new ErrorValidacion('La calificación debe ser un entero entre 1 y 5.');
+  }
+
+  const autorSanitizado = sanitizarTexto(autor);
+  const textoSanitizado = sanitizarTexto(texto);
+
+  if (
+    autorSanitizado.length < LONGITUD_MIN_AUTOR ||
+    autorSanitizado.length > LONGITUD_MAX_AUTOR
+  ) {
+    throw new ErrorValidacion(
+      `El autor debe tener entre ${LONGITUD_MIN_AUTOR} y ${LONGITUD_MAX_AUTOR} caracteres.`
+    );
+  }
+
+  if (
+    textoSanitizado.length < LONGITUD_MIN_TEXTO ||
+    textoSanitizado.length > LONGITUD_MAX_TEXTO
+  ) {
+    throw new ErrorValidacion(
+      `El comentario debe tener entre ${LONGITUD_MIN_TEXTO} y ${LONGITUD_MAX_TEXTO} caracteres.`
+    );
+  }
+
+  if (/<\/?[a-z][^>]*>/i.test(autorSanitizado) || /<\/?[a-z][^>]*>/i.test(textoSanitizado)) {
+    throw new ErrorValidacion('El comentario no puede contener etiquetas HTML.');
+  }
+
+  const { rows } = await db.query<Comentario>(
+    `INSERT INTO comentarios (autor, texto, calificacion)
+      VALUES ($1, $2, $3)
+    RETURNING *`,
+    [autorSanitizado, textoSanitizado, calificacion]
+  );
 
   return rows[0];
 }

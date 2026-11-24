@@ -6,26 +6,16 @@ import { spawn } from 'child_process';
 import config from '../config';
 import * as catalogo from '../services/catalogo.service';
 import * as usuarios from '../services/usuarios.service';
-import { requiereSesion } from '../middleware/auth';
-import type { Usuario } from '../tipos';
-import { obtenerSesion } from '../middleware/sesion';
+import { requiereSesion, requiereRol } from '../middleware/auth';
+import type { Rol, Usuario } from '../tipos';
 
 const router = express.Router();
 
-// Función de validación de roles
-function requiereRol(rolEsperado: string) {
-  return (req: any, res: any, next: any) => {
-    const sesion = obtenerSesion(req);
-    if (!sesion || !sesion.usuario || sesion.usuario.rol !== rolEsperado) {
-      return res.status(403).json({ error: 'Acceso denegado: se requiere rol ' + rolEsperado });
-    }
-    next();
-  };
-}
+const ROLES_PERMITIDOS: readonly Rol[] = ['admin', 'barista', 'mozo', 'cliente'];
 
-// Aplicamos el middleware a todas las rutas
-router.use(requiereRol('admin'));
+// Exigimos sesión válida y rol administrador en todas las rutas del panel
 router.use(requiereSesion);
+router.use(requiereRol('admin'));
 
 /** GET /api/admin/usuarios */
 router.get('/usuarios', async (req, res, next) => {
@@ -45,14 +35,16 @@ router.put('/usuarios/:id', async (req, res, next) => {
     if (username !== undefined) cambios.username = username;
     if (nombre !== undefined) cambios.nombre = nombre;
     if (password !== undefined) cambios.password = password;
-    
-    // Validación extra para AUTH-15: evitar que un admin modifique el rol sin control
+
+    // Verificar explícitamente el rol de quien solicita antes de modificar el campo "rol"
     if (rol !== undefined) {
-      const sesion = obtenerSesion(req);
-      if (sesion?.usuario?.rol !== 'admin') {
-        return res.status(403).json({ error: 'No tienes permiso para cambiar roles.' });
+      if (!req.usuario || req.usuario.rol !== 'admin') {
+        return res.status(403).json({ error: 'No tenés permiso para cambiar roles.' });
       }
-      cambios.rol = rol;
+      if (typeof rol !== 'string' || !ROLES_PERMITIDOS.includes(rol as Rol)) {
+        return res.status(400).json({ error: 'Rol no permitido.' });
+      }
+      cambios.rol = rol as Rol;
     }
 
     const usuario = await usuarios.actualizar(req.params.id, cambios);
